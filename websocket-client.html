@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web sockert client</title>
+</head>
+<body>
+  <form id="input-form">
+    <label for="message">Enter Message:</label>
+    <input type="text" id="message" name="message"><br><br>
+    <input type="submit" value="Send">
+</form>
+<div id="messages"></div>
+
+<script>
+    const webSocket = new WebSocket('ws://localhost:9000/');
+    webSocket.onmessage = (event) => {
+        console.log('webSocket.onmessage client', event)
+        document.getElementById('messages').innerHTML += `Message from server: ${event.data} <br>`;
+    };
+    webSocket.addEventListener("open", () => {
+        console.log("We are connected");
+    });
+    function sendMessage(event) {
+        var inputMessage = document.getElementById('message')
+        // console.log(event,"sendMessage event, inputMessage", inputMessage.value);
+        webSocket.send(inputMessage.value)
+        inputMessage.value = ""
+        event.preventDefault();
+    }
+    document.getElementById('input-form').addEventListener('submit', sendMessage);
+</script>
+</body>
+</html>
