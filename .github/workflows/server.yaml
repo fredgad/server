@@ -20,11 +20,10 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t your-image-name:latest .
+          docker build -t fredgad/hub-image .
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-          docker tag your-image-name:latest fredgad/server:latest
-          docker push fredgad/server:latest
-          docker pull fredgad/server:latest
+          docker tag fredgad/hub-image fredgad/hub-image
+          docker push fredgad/hub-image
 
   deploy:
     runs-on: ubuntu-latest
@@ -34,4 +33,4 @@ jobs:
     steps:
       - name: Deploy Docker container
         run: |
-          docker run -d -p 3000:3000 -p 9000:9000 fredgad/server:latest
+          docker run -d -p 3000:3000 -p 9000:9000 fredgad/hub-image
