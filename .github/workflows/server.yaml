@@ -22,7 +22,8 @@ jobs:
         run: |
           docker build -t your-image-name:latest .
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-          docker push your-image-name:latest
+          docker tag your-image-name:latest fredgad/server:latest
+          docker push fredgad/server:latest
 
   deploy:
     runs-on: ubuntu-latest
