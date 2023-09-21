@@ -14,7 +14,7 @@
 <div id="messages"></div>
 
 <script>
-    const webSocket = new WebSocket('ws://localhost:9000/');
+    const webSocket = new WebSocket('ws://localhost:3000/');
     webSocket.onmessage = (event) => {
         console.log('webSocket.onmessage client', event)
         document.getElementById('messages').innerHTML += `Message from server: ${event.data} <br>`;

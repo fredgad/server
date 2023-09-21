@@ -9,6 +9,9 @@
     "passport-openidconnect": "^0.1.1",
     "ws": "^8.14.1"
   },
+  "scripts": {
+    "start": "node index.js"
+  },
   "optionalDependencies": {
     "utf-8-validate": "^6.0.3"
   }

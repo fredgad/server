@@ -4,13 +4,13 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 9000;
 
-// app.use((req, res) => { // to show html
-//   console.log('req')
-//   res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-//   res.sendFile('./websocket-client.html', { root: __dirname });
-// });
+app.use((req, res) => { // to show html
+  console.log('req')
+  res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+  res.sendFile('./websocket-client.html', { root: __dirname });
+});
 
 const corsOptions = {
   origin: 'http://localhost:4200', // Replace with your Angular app's URL
@@ -95,8 +95,9 @@ function isUsernameUnique(data, username) {
 
 
 // webSocket
+const webSocketPort = process.env.PORT;
 const WebSocket = require('ws');
-const wsServer = new WebSocket.Server({port: 9000});
+const wsServer = new WebSocket.Server({port: 3000});
 wsServer.on('connection', onConnect);
 
 function onConnect(wsClient) {
