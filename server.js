@@ -22,9 +22,9 @@ const PORT = process.env.PORT || 9000;
 const MONGOURL = process.env.MONGO_URL;
 
 const uri = 'mongodb+srv://gad4red:7ecGfnIlbfJXd6k3@cluster-msr.0qeia.mongodb.net/?retryWrites=true&w=majority&appName=Cluster-msr';
-
+// ,'http://localhost:4200'
 const corsOptions = {
-  origin: 'http://localhost:4200',
+  origin: 'https://msr-pro.web.app',
   optionsSuccessStatus: 200,
 };
 
