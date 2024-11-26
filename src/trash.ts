@@ -1,14 +1,11 @@
 // app.use(express.json());
 // app.use(session({ secret: 'your-secret-key', resave: false, saveUninitialized: true }));
 
-
 // app.use((req, res) => { // to show html
 //   console.log('req')
 //   res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 //   res.sendFile('./websocket-client.html', { root: __dirname });
 // });
-
-
 
 // firebase initialization
 // var admin = require("firebase-admin");
@@ -19,7 +16,6 @@
 // });
 // const db = admin.database();
 // firebase initialization
-
 
 // webSocket
 // const webSocketPort = process.env.PORT;
