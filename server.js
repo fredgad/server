@@ -21,6 +21,8 @@ const secretKey = process.env.SECRET_KEY;
 const PORT = process.env.PORT || 9000;
 const MONGOURL = process.env.MONGO_URL;
 
+const uri = 'mongodb+srv://gad4red:7ecGfnIlbfJXd6k3@cluster-msr.0qeia.mongodb.net/?retryWrites=true&w=majority&appName=Cluster-msr';
+
 const corsOptions = {
   origin: 'http://localhost:4200',
   optionsSuccessStatus: 200,
@@ -33,26 +35,56 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 // MongoDB and GridFS Configuration
 let gfs, gridfsBucket;
 
-mongoose
-  .connect(MONGOURL, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => {
+// mongoose
+//   .connect(MONGOURL, { useNewUrlParser: true, useUnifiedTopology: true })
+//   .then(() => {
+//     console.log('Connected to MongoDB.');
+
+//     gridfsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+//       bucketName: 'uploads',
+//     });
+
+//     gfs = grid(mongoose.connection.db, mongoose.mongo);
+//     gfs.collection('uploads');
+//   })
+//   .catch(err => console.error('Could not connect to MongoDB...', err));
+
+async function connectToMongoDB() {
+  try {
+    await mongoose
+      .connect(uri, {
+        serverApi: {
+          version: '1',
+          strict: true,
+          deprecationErrors: true,
+        },
+      })
+      .then(() => {
+        console.log('Connected to MongoDB Atlas');
+      })
+      .catch(err => console.error('Could not connect to MongoDB Atlas...', err));
     console.log('Connected to MongoDB.');
 
+    // Configure GridFS
     gridfsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
       bucketName: 'uploads',
     });
-
     gfs = grid(mongoose.connection.db, mongoose.mongo);
     gfs.collection('uploads');
-  })
-  .catch(err => console.error('Could not connect to MongoDB...', err));
+  } catch (err) {
+    console.error('Could not connect to MongoDB...', err);
+    process.exit(1); // Exit if unable to connect
+  }
+}
+
+// Call the connection function
+connectToMongoDB();
 
 // Multer Storage Configuration for GridFS
 const storage = new GridFsStorage({
-  url: MONGOURL,
+  url: uri,
   options: { useUnifiedTopology: true },
   file: (req, file) => {
-    console.log('Обрабатываем файл:', file);
     return new Promise((resolve, reject) => {
       const fileInfo = {
         bucketName: 'uploads',
