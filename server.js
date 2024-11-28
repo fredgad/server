@@ -22,9 +22,10 @@ const PORT = process.env.PORT || 9000;
 const MONGOURL = process.env.MONGO_URL;
 
 const uri = 'mongodb+srv://gad4red:7ecGfnIlbfJXd6k3@cluster-msr.0qeia.mongodb.net/?retryWrites=true&w=majority&appName=Cluster-msr';
-// ,'http://localhost:4200'
+// const uri = process.env.MONGO_URL;
+
 const corsOptions = {
-  origin: 'https://msr-pro.web.app',
+  origin: ['http://localhost:4200', 'https://msr-pro.web.app'],
   optionsSuccessStatus: 200,
 };
 
@@ -399,12 +400,11 @@ app.post('/uploadVideo', authenticateToken, upload, async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded.' });
     }
 
-    // Логирование метаданных загруженного файла
-    console.log('Загруженный файл:', req.file);
+    // const fullUrl = `${req.protocol}s://${req.get('host')}/uploads/${req.file.filename}`;
+    // const fullUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
 
-    // Генерация URL для доступа к файлу через GridFS
-    // const fileUrl = `/uploads/${req.file.filename}`;
-    const fullUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const fullUrl = `${protocol}://${req.get('host')}/uploads/${req.file.filename}`;
 
     const video = {
       url: fullUrl,
@@ -418,7 +418,6 @@ app.post('/uploadVideo', authenticateToken, upload, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Логируем видео, которое добавляется в массив videos
     console.log('Saving video to user:', video);
 
     user.videos.push(video);
@@ -462,6 +461,60 @@ app.get('/getUserVideos', authenticateToken, async (req, res) => {
     res.status(200).json({ videos: user.videos });
   } catch (error) {
     console.error('Error retrieving user videos:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/deleteUserVideo', authenticateToken, async (req, res) => {
+  console.log('deleteUserVideo', req.body);
+  try {
+    const userId = req.user.userId;
+    const { url, createdAt } = req.body;
+
+    if (!url || !createdAt) {
+      return res.status(400).json({ error: 'Missing required fields: url or createdAt' });
+    }
+
+    const user = await userModel.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Найти индекс видео в массиве пользователя
+    const videoIndex = user.videos.findIndex(
+      video => video.url === url && new Date(video.createdAt).getTime() === new Date(createdAt).getTime()
+    );
+
+    if (videoIndex === -1) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+
+    // Получить имя файла из URL
+    const filename = url.split('/uploads/')[1];
+
+    if (!filename) {
+      return res.status(400).json({ error: 'Invalid video URL' });
+    }
+
+    // Удалить файл из GridFS
+    const file = await gfs.files.findOne({ filename });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found in GridFS' });
+    }
+
+    await gridfsBucket.delete(file._id);
+
+    const removedVideo = user.videos.splice(videoIndex, 1);
+
+    await user.save();
+
+    res.status(200).json({
+      message: 'Video deleted successfully',
+      video: removedVideo[0],
+    });
+  } catch (error) {
+    console.error('Error deleting user video:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
