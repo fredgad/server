@@ -1,3 +1,19 @@
+// mongoose
+//   .connect(MONGOURL, { useNewUrlParser: true, useUnifiedTopology: true })
+//   .then(() => {
+//     console.log('Connected to MongoDB.');
+
+//     gridfsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+//       bucketName: 'uploads',
+//     });
+
+//     gfs = grid(mongoose.connection.db, mongoose.mongo);
+//     gfs.collection('uploads');
+//   })
+//   .catch(err => console.error('Could not connect to MongoDB...', err));
+
+// import session from "session";
+
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import express from 'express';
@@ -5,27 +21,16 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+
 import grid from 'gridfs-stream';
 import { GridFsStorage } from 'multer-gridfs-storage';
 import multer from 'multer';
+
 import http from 'http';
 import { Server } from 'socket.io';
+
 import userModel from './app/models/user.model.js';
 import { generateUniqueKeyId } from './app/utils/generate-unique-key-id.js';
-import webpush from 'web-push';
-
-// import ffmpeg from 'fluent-ffmpeg';
-// import fs from 'fs';
-// import path from 'path';
-
-const vapidKeys = {
-  publicKey: process.env.VAPID_PUBLIC_KEY,
-  privateKey: process.env.VAPID_PRIVATE_KEY,
-};
-
-const VAPID_PUBLIC_KEY = 'BMjIBfz0QCcmGNE32T7hR8l0RDDB4WQUkyLIRzc7qqGby4q4McrDiqRknFsTOPDsy53rioiTsjspXve7k2idJRc';
-const VAPID_PRIVATE_KEY = 'kCdXufMEcnFX9EHOURWFgffRJnuycFl44fjpOfMis20';
-webpush.setVapidDetails('mailto:fred_gad@mail.ru', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 dotenv.config();
 
@@ -47,17 +52,7 @@ app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
-// const HLS_FOLDER = path.join(process.cwd(), 'hls');
-// if (!fs.existsSync(HLS_FOLDER)) {
-//   fs.mkdirSync(HLS_FOLDER);
-// }
-// app.use('/hls', express.static(HLS_FOLDER));
-
-// GET /hls/index.m3u8
-// GET /hls/segment_000.ts
-
 // MongoDB and GridFS Configuration
-
 let gfs, gridfsBucket;
 
 async function connectToMongoDB() {
@@ -107,6 +102,14 @@ const upload = multer({
   storage,
   limits: { fileSize: 500 * 1024 * 1024 },
 }).single('file');
+
+// io.on('connection', socket => {
+//   console.log('User connected');
+
+//   socket.on('disconnect', () => {
+//     console.log('User disconnected');
+//   });
+// });
 
 app.listen(PORT, () => {
   console.log(`Listening mongo on ${PORT}`);
@@ -430,36 +433,7 @@ app.post('/uploadVideo', authenticateToken, upload, async (req, res) => {
     await user.save();
 
     res.status(200).json({ message: 'Видео успешно загружено', video });
-
     // }
-
-    // push
-    const currentUser = await userModel.findById(userId);
-    // keyIds доверенных пользователей
-    const trustedKeyIds = currentUser.trustedPeople.map(t => t.keyId);
-
-    // Находим самих этих пользователей:
-    const trustedUsers = await userModel.find(
-      { keyId: { $in: trustedKeyIds } },
-      { pushSubscriptions: 1 } // нам важны только подписки
-    );
-    for (const trustedUser of trustedUsers) {
-      for (const subscription of trustedUser.pushSubscriptions) {
-        try {
-          await webpush.sendNotification(
-            subscription,
-            JSON.stringify({
-              title: 'Новая запись видео',
-              body: `Пользователь ${currentUser.username} начал запись видео.`,
-              icon: '/assets/icons/icon-192x192.png', // подставьте свою иконку
-            })
-          );
-        } catch (error) {
-          console.error('Ошибка при отправке пуша:', error);
-        }
-      }
-    }
-    // push
   } catch (error) {
     console.error('Error uploading video:', error);
     res.status(500).json({ error: error.message });
@@ -526,6 +500,7 @@ app.post('/deleteUserVideo', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Video not found' });
     }
 
+    // Получить имя файла из URL
     const filename = url.split('/uploads/')[1];
 
     if (!filename) {
@@ -554,29 +529,91 @@ app.post('/deleteUserVideo', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/saveSubscription', authenticateToken, async (req, res) => {
-  console.log('/saveSubscription', req.body);
-  try {
-    const userId = req.user.userId; // Берём из токена
-    const subscription = req.body.subscription;
-    if (!subscription) {
-      return res.status(400).json({ error: 'Subscription object is required' });
-    }
+// Endpoint to upload video in chunks
+// let videoStreams = {}; // To store the upload streams for each video
+// let videoFiles = {}; // To store the uploaded file references for each video
 
-    const user = await userModel.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+// app.post('/uploadVideo', authenticateToken, (req, res) => {
+//   upload(req, res, async err => {
+//     if (err) {
+//       console.error('Upload error:', err);
+//       return res.status(500).json({ error: err.message });
+//     }
 
-    const alreadyExists = user.pushSubscriptions.some(sub => sub.endpoint === subscription.endpoint);
-    if (!alreadyExists) {
-      user.pushSubscriptions.push(subscription);
-      await user.save();
-    }
+//     try {
+//       if (!req.file) {
+//         return res.status(400).json({ error: 'No file uploaded.' });
+//       }
 
-    res.status(200).json({ message: 'Subscription saved successfully' });
-  } catch (error) {
-    console.error('Error saving subscription:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+//       const { chunkIndex, videoId, isLastChunk } = req.body;
+//       const fileBuffer = req.file.buffer;
+
+//       if (!videoId || chunkIndex === undefined) {
+//         return res.status(400).json({ error: 'Missing videoId or chunkIndex.' });
+//       }
+
+//       console.log(`Chunk ${chunkIndex} uploaded for video ID: ${videoId}`);
+
+//       // Create a new upload stream if it doesn't exist
+//       if (!videoStreams[videoId]) {
+//         videoStreams[videoId] = gridfsBucket.openUploadStream(videoId, {
+//           chunkSizeBytes: 255 * 1024, // 255 KB per chunk, matching GridFS default
+//           metadata: { videoId },
+//         });
+
+//         // Immediately save the video metadata to user
+//         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+//         const fullUrl = `${protocol}://${req.get('host')}/uploads/${videoId}`;
+
+//         const video = {
+//           url: fullUrl,
+//           createdAt: Date.now(),
+//         };
+
+//         const userId = req.user.userId;
+//         const user = await userModel.findById(userId);
+
+//         if (!user) {
+//           console.error('User not found');
+//           return res.status(404).json({ error: 'User not found' });
+//         }
+
+//         console.log('Saving video to user:', video);
+
+//         user.videos.push(video);
+//         await user.save();
+
+//         console.log('Video metadata successfully saved');
+//       }
+
+//       // Write chunk to the existing upload stream
+//       if (fileBuffer) {
+//         videoStreams[videoId].write(fileBuffer, async writeErr => {
+//           if (writeErr) {
+//             console.error('Error writing chunk to stream:', writeErr);
+//             return res.status(500).json({ error: 'Error writing chunk to stream.' });
+//           }
+
+//           console.log('Chunk successfully written to stream');
+
+//           // Notify clients about the new chunk
+//           io.emit('videoChunk', { chunkIndex, videoId });
+
+//           if (isLastChunk) {
+//             videoStreams[videoId].end(() => {
+//               console.log(`Video upload completed for video ID: ${videoId}`);
+//               delete videoStreams[videoId];
+//             });
+//           }
+
+//           res.status(200).json({ message: `Chunk ${chunkIndex} uploaded.`, videoUrl: `/uploads/${videoId}` });
+//         });
+//       } else {
+//         throw new Error('File buffer is undefined');
+//       }
+//     } catch (error) {
+//       console.error('Error uploading video:', error);
+//       res.status(500).json({ error: error.message });
+//     }
+//   });
+// });

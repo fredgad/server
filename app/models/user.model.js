@@ -34,6 +34,20 @@ const userSchema = new mongoose.Schema({
     required: false,
     default: [],
   },
+
+  pushSubscriptions: {
+    type: [
+      {
+        endpoint: String,
+        expirationTime: mongoose.Schema.Types.Mixed,
+        keys: {
+          p256dh: String,
+          auth: String,
+        },
+      },
+    ],
+    default: [],
+  },
 });
 
 const UserModel = mongoose.model('users', userSchema);
