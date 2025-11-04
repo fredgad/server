@@ -15,33 +15,34 @@ export const onPublish = async (req, res) => {
     if (!streamKey)
       return res.status(400).json({ ok: false, error: 'name required' });
 
-    // найдём пользователя по keyId === streamKey
+    // 1) находим пользователя по keyId === streamKey
     const user = await User.findOne({ keyId: streamKey });
-
-    // не нашли — НЕ блокируем публикацию (вернём 200, чтобы nginx не рвал поток)
     if (!user) {
       console.warn('[hooks/on_publish] user not found for key:', streamKey);
+      // ВАЖНО: не блокируем публикацию, чтобы nginx не уронил RTMP
       return res.json({ ok: true, note: 'user not found; publish allowed' });
     }
 
-    // найдём/создадим стрим строго с userId
-    let stream = await StreamModel.findOne({ streamKey });
-    if (!stream) {
-      stream = await StreamModel.create({
-        userId: user._id, // <= обязательное поле
-        streamKey,
-        isLive: true,
-        startedAt: new Date(),
-      });
-    } else if (!stream.isLive) {
-      stream.isLive = true;
-      await stream.save();
-    }
+    // 2) гарантированно не создаём документ без userId
+    //    upsert: создаст, если нет; new: вернёт обновлённый
+    const stream = await StreamModel.findOneAndUpdate(
+      { streamKey },
+      {
+        $setOnInsert: {
+          userId: user._id,
+          streamKey,
+          createdAt: new Date(),
+        },
+        $set: { isLive: true },
+      },
+      { upsert: true, new: true }
+    );
 
+    console.log('[on_publish] ok:', { streamKey, userId: String(user._id) });
     return res.json({ ok: true });
   } catch (e) {
     console.error('[hooks/on_publish] Error:', e);
-    // даже при ошибке не валим публикацию
+    // Даже при ошибке не роняем публикацию, чтобы nginx не дал I/O error
     return res.status(200).json({ ok: true });
   }
 };
