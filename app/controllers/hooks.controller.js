@@ -15,41 +15,26 @@ export const onPublish = async (req, res) => {
     if (!streamKey)
       return res.status(400).json({ ok: false, error: 'name required' });
 
-    const stream = await StreamModel.findOne({ streamKey });
-    if (!stream)
-      return res.status(404).json({ ok: false, error: 'Stream not found' });
-
-    if (!stream.isLive) {
+    //  ВРЕМЕННО: не блокируем публикацию, если стрим не найден — создаём
+    let stream = await StreamModel.findOne({ streamKey });
+    if (!stream) {
+      // пробуем найти юзера по keyId = streamKey, иначе просто создадим «без привязки»
+      const user = await User.findOne({ keyId: streamKey });
+      stream = await StreamModel.create({
+        userId: user ? user._id : null,
+        streamKey,
+        isLive: true,
+        startedAt: new Date(),
+      });
+    } else if (!stream.isLive) {
       stream.isLive = true;
       await stream.save();
-    }
-
-    const currentUser = await User.findById(stream.userId);
-    if (currentUser) {
-      const trustedIds = currentUser.trustedPeople.map(t => t.keyId);
-      if (trustedIds.length) {
-        const trustedUsers = await User.find({ keyId: { $in: trustedIds } });
-        const notif = {
-          type: 'stream_start',
-          text: `${currentUser.username} начал прямую трансляцию`,
-          streamId: stream._id,
-          fromUser: currentUser.username,
-          createdAt: new Date(),
-          isRead: false,
-        };
-        await Promise.all(
-          trustedUsers.map(u => {
-            u.notifications.unshift(notif);
-            return u.save();
-          })
-        );
-      }
     }
 
     return res.json({ ok: true });
   } catch (e) {
     console.error('[hooks/on_publish]', e);
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(200).json({ ok: true }); // при ошибке не роняем публикацию
   }
 };
 
