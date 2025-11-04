@@ -86,15 +86,36 @@ export const onDone = async (req, res) => {
       timeoutMs: 10000,
       intervalMs: 200,
     });
-    if (!ok)
+    if (!ok) {
       return res
         .status(404)
         .json({ ok: false, error: 'file not ready', path: base });
+    }
 
-    // проверим, что стрим есть
+    // проверим, что стрим существует
     const stream = await StreamModel.findOne({ streamKey });
     if (!stream)
       return res.status(404).json({ ok: false, error: 'Stream not found' });
+
+    // ffprobe: получаем длительность
+    let duration = 0;
+    try {
+      const probe = await new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(base, (err, data) =>
+          err ? reject(err) : resolve(data)
+        );
+      });
+      duration =
+        probe?.format?.duration ??
+        probe?.streams?.find(s => s.codec_type === 'video')?.duration ??
+        0;
+      if (typeof duration === 'string') duration = parseFloat(duration) || 0;
+    } catch (e) {
+      console.warn(
+        '[on_done] ffprobe failed, continue without duration:',
+        e?.message
+      );
+    }
 
     // GridFS
     const db = mongoose.connection.db;
@@ -106,7 +127,7 @@ export const onDone = async (req, res) => {
 
     const uploadStream = bucket.openUploadStream(filename, {
       contentType: 'video/mp4',
-      metadata: { streamKey },
+      metadata: { streamKey, duration },
     });
 
     await new Promise((resolve, reject) => {
@@ -124,20 +145,33 @@ export const onDone = async (req, res) => {
 
     await User.updateOne(
       { _id: new Types.ObjectId(stream.userId) },
-      { $push: { videos: { url: vodUrl, createdAt: new Date() } } }
+      { $push: { videos: { url: vodUrl, createdAt: new Date(), duration } } }
     );
 
-    // удалим локальный mp4 (он уже в GridFS)
-    await fsp.unlink(base).catch(() => {});
+    // удаляем локальный mp4 только если длительность > 0
+    if (duration && duration > 0) {
+      await fsp.unlink(base).catch(() => {});
+    } else {
+      console.warn(
+        '[on_done] keep local mp4 due to zero/unknown duration:',
+        base
+      );
+    }
 
     console.log('[on_done] uploaded to GridFS', {
       streamKey,
       vodUrl,
       gridfsId: String(uploadStream.id),
+      duration,
     });
-    return res.json({ ok: true, vodUrl, gridfsId: String(uploadStream.id) });
+    return res.json({
+      ok: true,
+      vodUrl,
+      gridfsId: String(uploadStream.id),
+      duration,
+    });
   } catch (e) {
     console.error('[hooks/on_done]', e);
-    res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e.message });
   }
 };
