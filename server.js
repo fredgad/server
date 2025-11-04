@@ -14,6 +14,7 @@ import streamRoutes from './app/routes/stream.routes.js';
 import videoRoutes from './app/routes/video.routes.js';
 import notificationRoutes from './app/routes/notification.routes.js';
 import hooksRoutes from './app/routes/hooks.routes.js';
+import uploadsRoutes from './app/routes/uploads.routes.js';
 
 dotenv.config();
 
@@ -34,6 +35,7 @@ app.use('/stream', streamRoutes);
 app.use('/video', videoRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/hooks', hooksRoutes);
+app.use('/uploads', uploadsRoutes);
 
 const PORT = process.env.PORT || 9000;
 server.listen(PORT, '0.0.0.0', () =>

@@ -25,6 +25,7 @@ export const startStream = async (req, res) => {
     const publishRtmp = `rtmp://${
       process.env.MEDIA_HOST || '127.0.0.1'
     }:1935/live/${streamKey}`;
+    // live/live - to destroy confusion with nginx location /live/
 
     res.json({
       ok: true,
