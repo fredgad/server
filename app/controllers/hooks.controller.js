@@ -40,20 +40,58 @@ export const onPublish = async (req, res) => {
   }
 };
 
+async function waitForStableFile(
+  fullPath,
+  { timeoutMs = 10000, intervalMs = 250 } = {}
+) {
+  const start = Date.now();
+  let lastSize = -1;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const st = await fsp.stat(fullPath);
+      if (st.size > 0) {
+        if (st.size === lastSize) return true; // стабильно
+        lastSize = st.size;
+      }
+    } catch (_) {
+      /* нет файла пока */
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 export const onDone = async (req, res) => {
   try {
     const { secret } = req.query;
-    const streamKey = req.body?.name || req.query?.name; // <- ключ из тела POST
+    const streamKey = req.body?.name || req.query?.name;
     if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET)
       return res.status(403).json({ ok: false, error: 'forbidden' });
     if (!streamKey)
       return res.status(400).json({ ok: false, error: 'name required' });
 
-    // путь формируем на стороне сервера (не доверяем query)
-    const path = `/var/streams/${streamKey}.mp4`;
-    if (!fs.existsSync(path))
-      return res.status(404).json({ ok: false, error: 'file not found', path });
+    const base = `/var/streams/${streamKey}.mp4`;
+    const part = `${base}.part`;
 
+    // если mp4 нет, но есть .part — подождём стабилизацию и добьём rename
+    if (!fs.existsSync(base) && fs.existsSync(part)) {
+      await waitForStableFile(part, { timeoutMs: 8000, intervalMs: 200 });
+      try {
+        await fsp.rename(part, base);
+      } catch {}
+    }
+
+    // ждём появление и стабилизацию конечного файла
+    const ok = await waitForStableFile(base, {
+      timeoutMs: 10000,
+      intervalMs: 200,
+    });
+    if (!ok)
+      return res
+        .status(404)
+        .json({ ok: false, error: 'file not ready', path: base });
+
+    // проверим, что стрим есть
     const stream = await StreamModel.findOne({ streamKey });
     if (!stream)
       return res.status(404).json({ ok: false, error: 'Stream not found' });
@@ -70,14 +108,16 @@ export const onDone = async (req, res) => {
       contentType: 'video/mp4',
       metadata: { streamKey },
     });
+
     await new Promise((resolve, reject) => {
-      fs.createReadStream(path)
+      fs.createReadStream(base)
         .on('error', reject)
         .pipe(uploadStream)
         .on('error', reject)
         .on('finish', resolve);
     });
 
+    // обновим статус стрима и пользователя
     stream.isLive = false;
     stream.vodUrl = vodUrl;
     await stream.save();
@@ -87,7 +127,9 @@ export const onDone = async (req, res) => {
       { $push: { videos: { url: vodUrl, createdAt: new Date() } } }
     );
 
-    await fsp.unlink(path).catch(() => {});
+    // удалим локальный mp4 (он уже в GridFS)
+    await fsp.unlink(base).catch(() => {});
+
     console.log('[on_done] uploaded to GridFS', {
       streamKey,
       vodUrl,
