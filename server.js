@@ -37,6 +37,10 @@ app.use('/notifications', notificationRoutes);
 app.use('/hooks', hooksRoutes);
 app.use('/uploads', uploadsRoutes);
 
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
 const PORT = process.env.PORT || 9000;
 server.listen(PORT, '0.0.0.0', () =>
   console.log(`✅ Server running on port ${PORT}`)
