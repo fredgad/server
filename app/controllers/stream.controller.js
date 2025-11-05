@@ -1,28 +1,24 @@
-import crypto from 'crypto';
 import LiveStream from '../models/stream.model.js';
+import User from '../models/user.model.js';
 
 export const startStream = async (req, res) => {
   try {
-    // authenticateToken должен быть подключён до этого роутера:
-    // router.post('/start', authenticateToken, startStream)
     const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({ error: 'unauthorized' });
-    }
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+    const user = await User.findById(userId).lean();
+    if (!user?.keyId) return res.status(400).json({ error: 'keyId missing' });
 
     const title = req.body.title || 'Live';
+    const streamKey = user.keyId; // ← ключ стрима = keyId
 
-    // streamKey — уникальный ключ для RTMP
-    const streamKey = crypto.randomBytes(8).toString('hex');
+    // создадим/обновим запись стрима
+    const stream = await LiveStream.findOneAndUpdate(
+      { streamKey },
+      { $set: { userId, title, isLive: false } },
+      { new: true, upsert: true }
+    );
 
-    const stream = await LiveStream.create({
-      userId,
-      title,
-      streamKey,
-      isLive: false,
-    });
-
-    // === Определяем надёжно адрес сервера (MEDIA_HOST из .env или фактический хост) ===
     const rawHost =
       process.env.MEDIA_HOST ||
       (req.headers['x-forwarded-host'] || '').split(',')[0] ||
@@ -31,7 +27,6 @@ export const startStream = async (req, res) => {
 
     const publishRtmp = `rtmp://${rawHost}:1935/live/${streamKey}`;
 
-    // Возвращаем клиенту данные о стриме
     return res.json({
       ok: true,
       streamId: stream._id,
