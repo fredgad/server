@@ -1,10 +1,9 @@
-// app/controllers/stream.controller.js
 import crypto from 'crypto';
 import LiveStream from '../models/stream.model.js';
 
 export const startStream = async (req, res) => {
   try {
-    // Убедись, что до этого стоит authenticateToken миддлварь:
+    // authenticateToken должен быть подключён до этого роутера:
     // router.post('/start', authenticateToken, startStream)
     const userId = req.user?.userId;
     if (!userId) {
@@ -12,8 +11,9 @@ export const startStream = async (req, res) => {
     }
 
     const title = req.body.title || 'Live';
-    // streamKey — внешний ключ, именно его шлёт nginx как $name
-    const streamKey = crypto.randomBytes(8).toString('hex'); // короче и удобней
+
+    // streamKey — уникальный ключ для RTMP
+    const streamKey = crypto.randomBytes(8).toString('hex');
 
     const stream = await LiveStream.create({
       userId,
@@ -22,18 +22,24 @@ export const startStream = async (req, res) => {
       isLive: false,
     });
 
-    const publishRtmp = `rtmp://${
-      process.env.MEDIA_HOST || '127.0.0.1'
-    }:1935/live/${streamKey}`;
-    // live/live - to destroy confusion with nginx location /live/
+    // === Определяем надёжно адрес сервера (MEDIA_HOST из .env или фактический хост) ===
+    const rawHost =
+      process.env.MEDIA_HOST ||
+      (req.headers['x-forwarded-host'] || '').split(',')[0] ||
+      (req.headers.host || '').split(':')[0] ||
+      '127.0.0.1';
 
-    res.json({
+    const publishRtmp = `rtmp://${rawHost}:1935/live/${streamKey}`;
+
+    // Возвращаем клиенту данные о стриме
+    return res.json({
       ok: true,
       streamId: stream._id,
       streamKey,
       publish: { rtmp: publishRtmp },
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[startStream] error:', e);
+    return res.status(500).json({ ok: false, error: e.message });
   }
 };
