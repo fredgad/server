@@ -1,19 +1,23 @@
 import fs from 'fs';
 import { promises as fsp } from 'fs';
 import mongoose, { Types } from 'mongoose';
+import ffmpeg from 'fluent-ffmpeg';
+import ffprobe from 'ffprobe-static';
 
-import User from '../models/user.model.js'; // default export users
-import StreamModel from '../models/stream.model.js'; // LiveStream
+import User from '../models/user.model.js';
+import StreamModel from '../models/stream.model.js';
 
+// === Настраиваем путь к ffprobe ===
+ffmpeg.setFfprobePath(ffprobe.path);
+
+// === Хук: начало трансляции ===
 export const onPublish = async (req, res) => {
   try {
     const { secret } = req.query;
-    // name теперь приходит в теле (application/x-www-form-urlencoded) от nginx-rtmp
     const streamKey = req.body?.name || req.query?.name;
 
-    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET) {
+    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET)
       return res.status(403).json({ ok: false, error: 'forbidden' });
-    }
     if (!streamKey)
       return res.status(400).json({ ok: false, error: 'name required' });
 
@@ -40,6 +44,7 @@ export const onPublish = async (req, res) => {
   }
 };
 
+// === Вспомогательная функция ожидания стабильного файла ===
 async function waitForStableFile(
   fullPath,
   { timeoutMs = 10000, intervalMs = 250 } = {}
@@ -50,21 +55,23 @@ async function waitForStableFile(
     try {
       const st = await fsp.stat(fullPath);
       if (st.size > 0) {
-        if (st.size === lastSize) return true; // стабильно
+        if (st.size === lastSize) return true;
         lastSize = st.size;
       }
     } catch (_) {
-      /* нет файла пока */
+      /* файл пока не появился */
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
   return false;
 }
 
+// === Хук: завершение трансляции ===
 export const onDone = async (req, res) => {
   try {
     const { secret } = req.query;
     const streamKey = req.body?.name || req.query?.name;
+
     if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET)
       return res.status(403).json({ ok: false, error: 'forbidden' });
     if (!streamKey)
@@ -73,51 +80,41 @@ export const onDone = async (req, res) => {
     const base = `/var/streams/${streamKey}.mp4`;
     const part = `${base}.part`;
 
-    // если mp4 нет, но есть .part — подождём стабилизацию и добьём rename
+    // ждём пока файл стабилизируется
     if (!fs.existsSync(base) && fs.existsSync(part)) {
-      await waitForStableFile(part, { timeoutMs: 8000, intervalMs: 200 });
+      await waitForStableFile(part);
       try {
         await fsp.rename(part, base);
       } catch {}
     }
 
-    // ждём появление и стабилизацию конечного файла
-    const ok = await waitForStableFile(base, {
-      timeoutMs: 10000,
-      intervalMs: 200,
-    });
-    if (!ok) {
+    const ready = await waitForStableFile(base);
+    if (!ready) {
       return res
         .status(404)
         .json({ ok: false, error: 'file not ready', path: base });
     }
 
-    // проверим, что стрим существует
     const stream = await StreamModel.findOne({ streamKey });
     if (!stream)
       return res.status(404).json({ ok: false, error: 'Stream not found' });
 
-    // ffprobe: получаем длительность
+    // === ffprobe: длительность видео ===
     let duration = 0;
     try {
-      const probe = await new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(base, (err, data) =>
-          err ? reject(err) : resolve(data)
-        );
-      });
+      const probe = await new Promise((resolve, reject) =>
+        ffmpeg.ffprobe(base, (err, data) => (err ? reject(err) : resolve(data)))
+      );
       duration =
         probe?.format?.duration ??
         probe?.streams?.find(s => s.codec_type === 'video')?.duration ??
         0;
       if (typeof duration === 'string') duration = parseFloat(duration) || 0;
     } catch (e) {
-      console.warn(
-        '[on_done] ffprobe failed, continue without duration:',
-        e?.message
-      );
+      console.warn('[on_done] ffprobe failed:', e?.message);
     }
 
-    // GridFS
+    // === Загружаем mp4 в GridFS ===
     const db = mongoose.connection.db;
     const bucket = new mongoose.mongo.GridFSBucket(db, {
       bucketName: 'uploads',
@@ -138,7 +135,7 @@ export const onDone = async (req, res) => {
         .on('finish', resolve);
     });
 
-    // обновим статус стрима и пользователя
+    // === Обновляем базу ===
     stream.isLive = false;
     stream.vodUrl = vodUrl;
     await stream.save();
@@ -148,14 +145,11 @@ export const onDone = async (req, res) => {
       { $push: { videos: { url: vodUrl, createdAt: new Date(), duration } } }
     );
 
-    // удаляем локальный mp4 только если длительность > 0
-    if (duration && duration > 0) {
+    // === Удаляем локальный mp4, если всё ок ===
+    if (duration > 0) {
       await fsp.unlink(base).catch(() => {});
     } else {
-      console.warn(
-        '[on_done] keep local mp4 due to zero/unknown duration:',
-        base
-      );
+      console.warn('[on_done] keep local mp4 due to zero duration:', base);
     }
 
     console.log('[on_done] uploaded to GridFS', {
@@ -164,6 +158,7 @@ export const onDone = async (req, res) => {
       gridfsId: String(uploadStream.id),
       duration,
     });
+
     return res.json({
       ok: true,
       vodUrl,
