@@ -16,7 +16,15 @@ import notificationRoutes from './app/routes/notification.routes.js';
 import hooksRoutes from './app/routes/hooks.routes.js';
 import uploadsRoutes from './app/routes/uploads.routes.js';
 
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '.env') });
+console.log(
+  '[env loaded] STREAM_WEBHOOK_SECRET:',
+  process.env.STREAM_WEBHOOK_SECRET
+);
 
 const app = express();
 const server = http.createServer(app);

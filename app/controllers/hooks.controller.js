@@ -66,44 +66,54 @@ async function waitForStableFile(
   return false;
 }
 
-// === Хук: завершение трансляции ===
+// === Хук: завершение трансляции (FLV -> MP4 -> GridFS) ===
 export const onDone = async (req, res) => {
+  const t0 = Date.now();
   try {
+    // 1) Безопасность и входные данные
     const { secret } = req.query;
-    const streamKey = req.body?.name || req.query?.name;
-
-    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET)
+    const streamKey = req.body?.name || req.query?.name; // nginx-rtmp шлёт name=<key>
+    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET) {
       return res.status(403).json({ ok: false, error: 'forbidden' });
-    if (!streamKey)
+    }
+    if (!streamKey) {
       return res.status(400).json({ ok: false, error: 'name required' });
-
-    const base = `/var/streams/${streamKey}.mp4`;
-    const part = `${base}.part`;
-
-    // ждём пока файл стабилизируется
-    if (!fs.existsSync(base) && fs.existsSync(part)) {
-      await waitForStableFile(part);
-      try {
-        await fsp.rename(part, base);
-      } catch {}
     }
 
-    const ready = await waitForStableFile(base);
+    // nginx-rtmp передаёт полный путь к .flv
+    const flvPath = req.body?.path || `/var/streams/${streamKey}.flv`;
+    const outMp4 = `/var/streams/${streamKey}-${Date.now()}.mp4`;
+
+    // 2) Ждём, пока .flv «устаканится» (не растёт размер)
+    const ready = await waitForStableFile(flvPath, {
+      timeoutMs: 15_000,
+      intervalMs: 300,
+    });
     if (!ready) {
+      console.warn('[on_done] file not ready:', flvPath);
       return res
         .status(404)
-        .json({ ok: false, error: 'file not ready', path: base });
+        .json({ ok: false, error: 'file not ready', path: flvPath });
     }
 
-    const stream = await StreamModel.findOne({ streamKey });
-    if (!stream)
-      return res.status(404).json({ ok: false, error: 'Stream not found' });
+    // 3) Remux FLV -> MP4 без перекодирования (быстро, -c copy)
+    await new Promise((resolve, reject) => {
+      ffmpeg(flvPath)
+        .outputOptions(['-c copy', '-movflags +faststart'])
+        .on('error', err =>
+          reject(new Error('ffmpeg remux error: ' + err.message))
+        )
+        .on('end', resolve)
+        .save(outMp4);
+    });
 
-    // === ffprobe: длительность видео ===
+    // 4) ffprobe: получаем длительность
     let duration = 0;
     try {
       const probe = await new Promise((resolve, reject) =>
-        ffmpeg.ffprobe(base, (err, data) => (err ? reject(err) : resolve(data)))
+        ffmpeg.ffprobe(outMp4, (err, data) =>
+          err ? reject(err) : resolve(data)
+        )
       );
       duration =
         probe?.format?.duration ??
@@ -114,7 +124,14 @@ export const onDone = async (req, res) => {
       console.warn('[on_done] ffprobe failed:', e?.message);
     }
 
-    // === Загружаем mp4 в GridFS ===
+    // 5) Ищем Stream и валидируем
+    const stream = await StreamModel.findOne({ streamKey });
+    if (!stream) {
+      console.warn('[on_done] Stream not found for key:', streamKey);
+      return res.status(404).json({ ok: false, error: 'Stream not found' });
+    }
+
+    // 6) Загрузка MP4 в GridFS
     const db = mongoose.connection.db;
     const bucket = new mongoose.mongo.GridFSBucket(db, {
       bucketName: 'uploads',
@@ -128,14 +145,14 @@ export const onDone = async (req, res) => {
     });
 
     await new Promise((resolve, reject) => {
-      fs.createReadStream(base)
+      fs.createReadStream(outMp4)
         .on('error', reject)
         .pipe(uploadStream)
         .on('error', reject)
         .on('finish', resolve);
     });
 
-    // === Обновляем базу ===
+    // 7) Обновляем документы
     stream.isLive = false;
     stream.vodUrl = vodUrl;
     await stream.save();
@@ -145,18 +162,19 @@ export const onDone = async (req, res) => {
       { $push: { videos: { url: vodUrl, createdAt: new Date(), duration } } }
     );
 
-    // === Удаляем локальный mp4, если всё ок ===
-    if (duration > 0) {
-      await fsp.unlink(base).catch(() => {});
-    } else {
-      console.warn('[on_done] keep local mp4 due to zero duration:', base);
-    }
+    // 8) Уборка локальных файлов
+    // MP4 удаляем всегда после успешной загрузки.
+    await fsp.unlink(outMp4).catch(() => {});
+    // FLV оставляем, если длительность нулевая — пригодится для отладки; иначе можно чистить:
+    if (duration > 0) await fsp.unlink(flvPath).catch(() => {});
 
+    // 9) Лог и ответ
     console.log('[on_done] uploaded to GridFS', {
       streamKey,
       vodUrl,
       gridfsId: String(uploadStream.id),
       duration,
+      ms: Date.now() - t0,
     });
 
     return res.json({
