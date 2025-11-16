@@ -1,3 +1,4 @@
+// app/controllers/hooks.controller.js
 import fs from 'fs';
 import { promises as fsp } from 'fs';
 import mongoose, { Types } from 'mongoose';
@@ -7,23 +8,60 @@ import ffprobe from 'ffprobe-static';
 import User from '../models/user.model.js';
 import StreamModel from '../models/stream.model.js';
 
-// === Настраиваем путь к ffprobe ===
+// === ffprobe path ===
 ffmpeg.setFfprobePath(ffprobe.path);
 
-// === Хук: начало трансляции ===
+// === in-memory dedup set (reset after few minutes) ===
+const seenFiles = new Set();
+const DEDUP_TTL_MS = 5 * 60 * 1000;
+
+// === helpers ===
+const ts = () => new Date().toISOString();
+
+async function waitForStableFile(
+  fullPath,
+  { timeoutMs = 15000, intervalMs = 300 } = {}
+) {
+  const start = Date.now();
+  let lastSize = -1;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const st = await fsp.stat(fullPath);
+      if (st.size > 0) {
+        if (st.size === lastSize) return true;
+        lastSize = st.size;
+      }
+    } catch {
+      // файл ещё не создан — ждём
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
+function parseNum(v, def = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+}
+
+// === on_publish: трансляция началась ===
 export const onPublish = async (req, res) => {
   try {
     const { secret } = req.query;
     const streamKey = req.body?.name || req.query?.name;
 
-    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET)
+    if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET) {
+      console.warn(`[on_publish] ${ts()} forbidden: bad secret`);
       return res.status(403).json({ ok: false, error: 'forbidden' });
-    if (!streamKey)
+    }
+    if (!streamKey) {
+      console.warn(`[on_publish] ${ts()} missing streamKey (name)`);
       return res.status(400).json({ ok: false, error: 'name required' });
+    }
 
     const user = await User.findOne({ keyId: streamKey });
     if (!user) {
-      console.warn('[hooks/on_publish] user not found for key:', streamKey);
+      console.warn(`[on_publish] ${ts()} user not found for key=${streamKey}`);
       return res.json({ ok: true, note: 'user not found; publish allowed' });
     }
 
@@ -39,75 +77,106 @@ export const onPublish = async (req, res) => {
     console.log('[on_publish] ok:', { streamKey, userId: String(user._id) });
     return res.json({ ok: true });
   } catch (e) {
-    console.error('[hooks/on_publish] Error:', e);
+    console.error('[on_publish] error:', e);
+    // возвращаем 200 чтобы nginx-rtmp не рвал соединение
     return res.status(200).json({ ok: true });
   }
 };
 
-// === Вспомогательная функция ожидания стабильного файла ===
-async function waitForStableFile(
-  fullPath,
-  { timeoutMs = 10000, intervalMs = 250 } = {}
-) {
-  const start = Date.now();
-  let lastSize = -1;
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const st = await fsp.stat(fullPath);
-      if (st.size > 0) {
-        if (st.size === lastSize) return true;
-        lastSize = st.size;
-      }
-    } catch (_) {
-      /* файл пока не появился */
-    }
-    await new Promise(r => setTimeout(r, intervalMs));
-  }
-  return false;
-}
-
-// === Хук: завершение трансляции (FLV -> MP4 -> GridFS) ===
+// === on_done/on_record_done: запись файла завершена ===
 export const onDone = async (req, res) => {
   const t0 = Date.now();
+
   try {
-    // 1) Безопасность и входные данные
+    // 1) базовые параметры
     const { secret } = req.query;
-    const streamKey = req.body?.name || req.query?.name; // nginx-rtmp шлёт name=<key>
+    const call = req.body?.call || req.query?.call; // 'record_done' и т.д.
+    const streamKey = req.body?.name || req.query?.name;
+    const ngPath = req.body?.path; // присылается nginx-rtmp
+    const inFilename = req.body?.filename; // исходное имя (обычно .flv)
+    const clientInfo = {
+      addr: req.body?.addr,
+      clientid: req.body?.clientid,
+      bytes_in: parseNum(req.body?.bytes_in),
+      bytes_out: parseNum(req.body?.bytes_out),
+      session_time: parseNum(req.body?.session_time),
+    };
+
+    console.log(`[on_done] ${ts()} <- ${req.method} call=${call}`, {
+      query: req.query,
+      body: {
+        name: streamKey,
+        path: ngPath,
+        filename: inFilename,
+        ...clientInfo,
+      },
+    });
+
+    // 2) защита
     if (!secret || secret !== process.env.STREAM_WEBHOOK_SECRET) {
+      console.warn(`[on_done] ${ts()} forbidden: bad secret`);
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
     if (!streamKey) {
+      console.warn(`[on_done] ${ts()} missing streamKey (name)`);
       return res.status(400).json({ ok: false, error: 'name required' });
     }
 
-    // nginx-rtmp передаёт полный путь к .flv
-    const flvPath = req.body?.path || `/var/streams/${streamKey}.flv`;
-    const outMp4 = `/var/streams/${streamKey}-${Date.now()}.mp4`;
+    // 3) путь к исходнику (.flv) — при record_suffix .flv
+    const flvPath = ngPath || `/var/streams/${streamKey}.flv`;
+    console.log(`[on_done] ${ts()} flvPath=${flvPath}`);
 
-    // 2) Ждём, пока .flv «устаканится» (не растёт размер)
+    // 4) ждём стабилизацию файла
     const ready = await waitForStableFile(flvPath, {
-      timeoutMs: 15_000,
+      timeoutMs: 15000,
       intervalMs: 300,
     });
     if (!ready) {
-      console.warn('[on_done] file not ready:', flvPath);
+      console.warn(`[on_done] ${ts()} file not ready: ${flvPath}`);
       return res
         .status(404)
         .json({ ok: false, error: 'file not ready', path: flvPath });
     }
 
-    // 3) Remux FLV -> MP4 без перекодирования (быстро, -c copy)
+    // 5) быстрый фильтр по размеру (мусорные коротыши)
+    const st = await fsp.stat(flvPath);
+    console.log(
+      `[on_done] ${ts()} flv size=${st.size}B ino=${st.ino} mtimeMs=${
+        st.mtimeMs
+      }`
+    );
+    const MIN_SIZE = 200 * 1024; // 200KB
+    if (st.size < MIN_SIZE) {
+      console.warn(
+        `[on_done] ${ts()} skip: too small (${st.size}B < ${MIN_SIZE})`
+      );
+      return res.json({ ok: true, skipped: true, reason: 'too small' });
+    }
+
+    // 6) дедуп: тот же файл уже обрабатывали
+    const dedupKey = `${flvPath}:${st.ino}:${Math.trunc(st.mtimeMs)}`;
+    if (seenFiles.has(dedupKey)) {
+      console.warn(`[on_done] ${ts()} skip: duplicate dedupKey=${dedupKey}`);
+      return res.json({ ok: true, skipped: true, reason: 'duplicate' });
+    }
+    seenFiles.add(dedupKey);
+    setTimeout(() => seenFiles.delete(dedupKey), DEDUP_TTL_MS);
+
+    // 7) ремакс FLV -> MP4 без перекодирования
+    const mp4Filename = `${streamKey}-${Date.now()}.mp4`;
+    const outMp4 = `/var/streams/${mp4Filename}`;
+
     await new Promise((resolve, reject) => {
       ffmpeg(flvPath)
         .outputOptions(['-c copy', '-movflags +faststart'])
-        .on('error', err =>
-          reject(new Error('ffmpeg remux error: ' + err.message))
-        )
+        .on('start', cmd => console.log(`[on_done] ${ts()} ffmpeg: ${cmd}`))
+        .on('error', err => reject(err))
         .on('end', resolve)
         .save(outMp4);
     });
+    console.log(`[on_done] ${ts()} remuxed -> ${outMp4}`);
 
-    // 4) ffprobe: получаем длительность
+    // 8) длительность MP4
     let duration = 0;
     try {
       const probe = await new Promise((resolve, reject) =>
@@ -120,26 +189,41 @@ export const onDone = async (req, res) => {
         probe?.streams?.find(s => s.codec_type === 'video')?.duration ??
         0;
       if (typeof duration === 'string') duration = parseFloat(duration) || 0;
+      console.log(`[on_done] ${ts()} probed duration=${duration}`);
     } catch (e) {
-      console.warn('[on_done] ffprobe failed:', e?.message);
+      console.warn(`[on_done] ${ts()} ffprobe failed: ${e?.message}`);
     }
 
-    // 5) Ищем Stream и валидируем
+    // минимальная длительность
+    const MIN_DUR = 2.0; // сек
+    if (duration < MIN_DUR) {
+      console.warn(
+        `[on_done] ${ts()} skip: duration ${duration}s < ${MIN_DUR}s`
+      );
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: 'short duration',
+        duration,
+      });
+    }
+
+    // 9) находим Stream
     const stream = await StreamModel.findOne({ streamKey });
     if (!stream) {
-      console.warn('[on_done] Stream not found for key:', streamKey);
+      console.warn(`[on_done] ${ts()} Stream not found for key=${streamKey}`);
       return res.status(404).json({ ok: false, error: 'Stream not found' });
     }
 
-    // 6) Загрузка MP4 в GridFS
+    // 10) загрузка в GridFS
     const db = mongoose.connection.db;
     const bucket = new mongoose.mongo.GridFSBucket(db, {
       bucketName: 'uploads',
     });
-    const filename = `${streamKey}-${Date.now()}.mp4`;
-    const vodUrl = `/uploads/${filename}`;
+    const gridName = mp4Filename; // сохраняем то же имя
+    const vodUrl = `/uploads/${gridName}`;
 
-    const uploadStream = bucket.openUploadStream(filename, {
+    const uploadStream = bucket.openUploadStream(gridName, {
       contentType: 'video/mp4',
       metadata: { streamKey, duration },
     });
@@ -152,7 +236,7 @@ export const onDone = async (req, res) => {
         .on('finish', resolve);
     });
 
-    // 7) Обновляем документы
+    // 11) обновляем БД
     stream.isLive = false;
     stream.vodUrl = vodUrl;
     await stream.save();
@@ -162,19 +246,18 @@ export const onDone = async (req, res) => {
       { $push: { videos: { url: vodUrl, createdAt: new Date(), duration } } }
     );
 
-    // 8) Уборка локальных файлов
-    // MP4 удаляем всегда после успешной загрузки.
+    // 12) чистим локальный MP4
     await fsp.unlink(outMp4).catch(() => {});
-    // FLV оставляем, если длительность нулевая — пригодится для отладки; иначе можно чистить:
-    if (duration > 0) await fsp.unlink(flvPath).catch(() => {});
+    // при желании можно также удалять .flv:
+    // await fsp.unlink(flvPath).catch(() => {});
 
-    // 9) Лог и ответ
+    const ms = Date.now() - t0;
     console.log('[on_done] uploaded to GridFS', {
       streamKey,
       vodUrl,
       gridfsId: String(uploadStream.id),
       duration,
-      ms: Date.now() - t0,
+      ms,
     });
 
     return res.json({
@@ -182,9 +265,10 @@ export const onDone = async (req, res) => {
       vodUrl,
       gridfsId: String(uploadStream.id),
       duration,
+      ms,
     });
   } catch (e) {
-    console.error('[hooks/on_done]', e);
+    console.error('[on_done] error:', e);
     return res.status(500).json({ ok: false, error: e.message });
   }
 };

@@ -1,12 +1,26 @@
 import { gridfsBucket, gfs } from '../config/db.js';
 import mongoose from 'mongoose';
 import userModel from '../models/user.model.js';
+import { toPublicUrl } from '../utils/public-url.js';
+
+const serializeVideos = (videos = [], req) =>
+  videos.map(videoDoc => {
+    const video =
+      typeof videoDoc?.toObject === 'function'
+        ? videoDoc.toObject()
+        : { ...videoDoc };
+    return {
+      ...video,
+      url: toPublicUrl(req, video.url),
+    };
+  });
 
 // ======== Получить видео пользователя ========
 export const getUserVideos = async (req, res) => {
   try {
     const user = await userModel.findById(req.user.userId);
-    res.json({ videos: user.videos || [] });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ videos: serializeVideos(user.videos || [], req) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
