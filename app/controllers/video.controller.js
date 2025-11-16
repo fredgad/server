@@ -1,7 +1,7 @@
 import { gridfsBucket, gfs } from '../config/db.js';
-import mongoose from 'mongoose';
 import userModel from '../models/user.model.js';
 import { toPublicUrl } from '../utils/public-url.js';
+import { streamGridFsFile } from '../utils/gridfs-stream.js';
 
 const serializeVideos = (videos = [], req) =>
   videos.map(videoDoc => {
@@ -29,42 +29,7 @@ export const getUserVideos = async (req, res) => {
 // ======== Просмотр видео (stream GridFS) ========
 export const getVideoFile = async (req, res) => {
   try {
-    const filename = req.params.filename;
-    const file = await mongoose.connection.db
-      .collection('uploads.files')
-      .findOne({ filename });
-    if (!file) return res.status(404).json({ error: 'File not found' });
-
-    const range = req.headers.range;
-    const size = file.length;
-    const mime = file.contentType || 'video/mp4';
-
-    res.set('Accept-Ranges', 'bytes');
-    res.set('Content-Type', mime);
-
-    if (!range) {
-      res.set('Content-Length', String(size));
-      const dl = gridfsBucket.openDownloadStreamByName(filename);
-      return dl.pipe(res);
-    }
-
-    const m = /bytes=(\d*)-(\d*)/.exec(range);
-    let start = m && m[1] ? parseInt(m[1], 10) : 0;
-    let end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-    if (start > end) start = 0;
-    const chunkLen = end - start + 1;
-
-    res.status(206).set({
-      'Content-Range': `bytes ${start}-${end}/${size}`,
-      'Content-Length': String(chunkLen),
-      'Cache-Control': 'no-cache',
-    });
-
-    const dl = gridfsBucket.openDownloadStreamByName(filename, {
-      start,
-      end: end + 1,
-    });
-    dl.pipe(res);
+    await streamGridFsFile(req, res, req.params.filename);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
