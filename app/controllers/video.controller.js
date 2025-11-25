@@ -62,17 +62,37 @@ export const deleteUserVideo = async (req, res) => {
       await gridfsBucket.delete(file._id);
     }
 
-    user.videos = user.videos.filter(
-      v =>
-        !(
-          (extractFilename(v.url) === filename ||
-            v.url === normalizedUrl ||
-            v.url === url) &&
-          (!createdAtMs ||
-            new Date(v.createdAt).getTime() === createdAtMs)
-        )
+    const videos = user.videos || [];
+    const byDateMatch = videos.find(v => {
+      const sameFile =
+        extractFilename(v.url) === filename ||
+        v.url === normalizedUrl ||
+        v.url === url;
+      if (!sameFile) return false;
+      if (!createdAtMs) return true;
+      const videoCreatedAt = new Date(v.createdAt).getTime();
+      return Number.isFinite(videoCreatedAt)
+        ? videoCreatedAt === createdAtMs
+        : true;
+    });
+
+    const videoToRemove =
+      byDateMatch ||
+      videos.find(
+        v =>
+          extractFilename(v.url) === filename ||
+          v.url === normalizedUrl ||
+          v.url === url
+      );
+
+    if (!videoToRemove) {
+      return res.status(404).json({ error: 'Video not found for user' });
+    }
+
+    await userModel.updateOne(
+      { _id: user._id },
+      { $pull: { videos: { _id: videoToRemove._id } } }
     );
-    await user.save();
 
     res.json({ message: 'Video deleted successfully' });
   } catch (e) {
