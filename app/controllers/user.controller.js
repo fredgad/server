@@ -1,5 +1,18 @@
 import userModel from '../models/user.model.js';
 import jwt from 'jsonwebtoken';
+import { toPublicUrl } from '../utils/public-url.js';
+
+const serializeVideos = (videos = [], req) =>
+  videos.map(videoDoc => {
+    const video =
+      typeof videoDoc?.toObject === 'function'
+        ? videoDoc.toObject()
+        : { ...videoDoc };
+    return {
+      ...video,
+      url: toPublicUrl(req, video.url),
+    };
+  });
 
 // ======== Получить текущего пользователя ========
 export const getUser = async (req, res) => {
@@ -24,7 +37,13 @@ export const getTrustedUsersByKeyIds = async (req, res) => {
       { username: 1, email: 1, keyId: 1, image: 1, videos: 1 }
     );
 
-    res.json(users);
+    const serialized = users.map(u => {
+      const obj = u.toObject();
+      obj.videos = serializeVideos(obj.videos || [], req);
+      return obj;
+    });
+
+    res.json(serialized);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
