@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema({
   tarif: { type: Boolean, required: false },
   image: { type: String, required: false },
   keyId: { type: String, required: true, unique: true },
+  videoDeletionDelayMinutes: { type: Number, default: 0 },
+  deletionPasswordRequired: { type: Boolean, default: false },
 
   outgoingReq: { type: [String], required: false, default: [] },
   incomingReq: { type: [String], required: false, default: [] },
@@ -28,7 +30,7 @@ const userSchema = new mongoose.Schema({
       {
         url: { type: String, required: true },
         createdAt: { type: Date, default: Date.now },
-        // deletionTime: { type: String, required: true },
+        deletionDelayMinutes: { type: Number, default: 0 },
       },
     ],
     required: false,

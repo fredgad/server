@@ -21,10 +21,6 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '.env') });
-console.log(
-  '[env loaded] STREAM_WEBHOOK_SECRET:',
-  process.env.STREAM_WEBHOOK_SECRET
-);
 
 const app = express();
 const server = http.createServer(app);

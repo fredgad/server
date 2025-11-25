@@ -141,11 +141,10 @@ export const onDone = async (req, res) => {
     // 5) быстрый фильтр по размеру (мусорные коротыши)
     const st = await fsp.stat(flvPath);
     console.log(
-      `[on_done] ${ts()} flv size=${st.size}B ino=${st.ino} mtimeMs=${
-        st.mtimeMs
+      `[on_done] ${ts()} flv size=${st.size}B ino=${st.ino} mtimeMs=${st.mtimeMs
       }`
     );
-    const MIN_SIZE = 200 * 1024; // 200KB
+    const MIN_SIZE = 1024; // 1KB
     if (st.size < MIN_SIZE) {
       console.warn(
         `[on_done] ${ts()} skip: too small (${st.size}B < ${MIN_SIZE})`
@@ -195,7 +194,7 @@ export const onDone = async (req, res) => {
     }
 
     // минимальная длительность
-    const MIN_DUR = 2.0; // сек
+    const MIN_DUR = 0; // сек
     if (duration < MIN_DUR) {
       console.warn(
         `[on_done] ${ts()} skip: duration ${duration}s < ${MIN_DUR}s`
@@ -247,7 +246,7 @@ export const onDone = async (req, res) => {
     );
 
     // 12) чистим локальный MP4
-    await fsp.unlink(outMp4).catch(() => {});
+    await fsp.unlink(outMp4).catch(() => { });
     // при желании можно также удалять .flv:
     // await fsp.unlink(flvPath).catch(() => {});
 
