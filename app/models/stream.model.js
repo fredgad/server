@@ -10,6 +10,7 @@ const schema = new mongoose.Schema({
   streamKey: { type: String, required: true }, // ← это то, что в nginx $name
   title: { type: String, default: 'Live Stream' },
   isLive: { type: Boolean, default: false },
+  startedAt: { type: Date, default: Date.now },
   vodUrl: { type: String },
   createdAt: { type: Date, default: Date.now },
 });

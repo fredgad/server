@@ -69,7 +69,7 @@ export const onPublish = async (req, res) => {
       { streamKey },
       {
         $setOnInsert: { userId: user._id, streamKey, createdAt: new Date() },
-        $set: { isLive: true },
+        $set: { isLive: true, startedAt: new Date() },
       },
       { upsert: true, new: true }
     );

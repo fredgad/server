@@ -15,11 +15,12 @@
 // export default router;
 
 import { Router } from 'express';
-import { startStream } from '../controllers/stream.controller.js';
+import { startStream, getActiveStreams } from '../controllers/stream.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 
 const router = Router();
 router.post('/start', authenticateToken, startStream);
+router.get('/active', authenticateToken, getActiveStreams);
 export default router;
 
 // import { Router } from 'express';

@@ -1,6 +1,22 @@
 import LiveStream from '../models/stream.model.js';
 import User from '../models/user.model.js';
 
+const buildPlaybackUrl = (req, streamKey) => {
+  const rawHost =
+    process.env.MEDIA_HOST ||
+    (req.headers['x-forwarded-host'] || '').split(',')[0] ||
+    (req.headers.host || '').split(':')[0] ||
+    '127.0.0.1';
+
+  const proto =
+    process.env.PUBLIC_PROTO ||
+    (req.headers['x-forwarded-proto'] || '').split(',')[0] ||
+    'http';
+  const hlsPort = process.env.HLS_PORT || '8080';
+
+  return `${proto}://${rawHost}:${hlsPort}/live/${streamKey}/index.m3u8`;
+};
+
 export const startStream = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -36,5 +52,58 @@ export const startStream = async (req, res) => {
   } catch (e) {
     console.error('[startStream] error:', e);
     return res.status(500).json({ ok: false, error: e.message });
+  }
+};
+
+export const getActiveStreams = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user.userId).select(
+      'trustedPeople'
+    );
+    if (!currentUser)
+      return res.status(404).json({ error: 'User not found' });
+
+    const trustedKeyIds = (currentUser.trustedPeople || [])
+      .map(p => p.keyId)
+      .filter(Boolean);
+
+    if (trustedKeyIds.length === 0) {
+      return res.json([]);
+    }
+
+    const trustedUsers = await User.find(
+      { keyId: { $in: trustedKeyIds } },
+      { _id: 1, username: 1, keyId: 1 }
+    );
+    const userById = new Map(
+      trustedUsers.map(u => [String(u._id), u.toObject()])
+    );
+    const trustedUserIds = trustedUsers.map(u => u._id);
+
+    const streams = await LiveStream.find({
+      userId: { $in: trustedUserIds },
+      isLive: true,
+    });
+
+    const payload = streams.map(s => {
+      const owner = userById.get(String(s.userId)) || {};
+      return {
+        streamId: s._id,
+        streamKey: s.streamKey,
+        title: s.title || 'Live Stream',
+        startedAt: s.startedAt || s.createdAt,
+        playbackUrl: buildPlaybackUrl(req, s.streamKey),
+        fromUser: {
+          id: owner._id,
+          username: owner.username,
+          keyId: owner.keyId,
+        },
+      };
+    });
+
+    return res.json(payload);
+  } catch (e) {
+    console.error('[getActiveStreams] error:', e);
+    return res.status(500).json({ error: e.message });
   }
 };
