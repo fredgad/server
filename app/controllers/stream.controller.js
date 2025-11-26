@@ -2,19 +2,27 @@ import LiveStream from '../models/stream.model.js';
 import User from '../models/user.model.js';
 
 const buildPlaybackUrl = (req, streamKey) => {
-  const rawHost =
-    process.env.MEDIA_HOST ||
-    (req.headers['x-forwarded-host'] || '').split(',')[0] ||
-    (req.headers.host || '').split(':')[0] ||
-    '127.0.0.1';
-
   const proto =
     process.env.PUBLIC_PROTO ||
     (req.headers['x-forwarded-proto'] || '').split(',')[0] ||
     'http';
-  const hlsPort = process.env.HLS_PORT || '8080';
 
-  return `${proto}://${rawHost}:${hlsPort}/live/${streamKey}/index.m3u8`;
+  const hostSource =
+    process.env.HLS_HOST ||
+    process.env.MEDIA_HOST ||
+    process.env.PUBLIC_HOST ||
+    (req.headers['x-forwarded-host'] || '').split(',')[0] ||
+    (req.headers.host || '').split(',')[0] ||
+    '127.0.0.1';
+
+  const hostParts = hostSource.split(':');
+  const hostName = hostParts[0];
+  const hostPort = process.env.HLS_PORT || hostParts[1] || '';
+  const hostWithPort = hostPort ? `${hostName}:${hostPort}` : hostName;
+
+  const pathPrefix = (process.env.HLS_PATH || '/hls').replace(/\/+$/, '');
+
+  return `${proto}://${hostWithPort}${pathPrefix}/${streamKey}/index.m3u8`;
 };
 
 export const startStream = async (req, res) => {
