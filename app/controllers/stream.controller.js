@@ -21,8 +21,15 @@ const buildPlaybackUrl = (req, streamKey) => {
   const hostWithPort = hostPort ? `${hostName}:${hostPort}` : hostName;
 
   const pathPrefix = (process.env.HLS_PATH || '/hls').replace(/\/+$/, '');
+  const nested = String(process.env.HLS_NESTED || '').toLowerCase() === 'on';
 
-  return `${proto}://${hostWithPort}${pathPrefix}/${streamKey}/index.m3u8`;
+  // nginx-rtmp: hls_nested on -> /hls/<key>/index.m3u8
+  // hls_nested off (default) -> /hls/<key>.m3u8
+  const path = nested
+    ? `${pathPrefix}/${streamKey}/index.m3u8`
+    : `${pathPrefix}/${streamKey}.m3u8`;
+
+  return `${proto}://${hostWithPort}${path}`;
 };
 
 export const startStream = async (req, res) => {
