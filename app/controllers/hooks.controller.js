@@ -1,6 +1,7 @@
 // app/controllers/hooks.controller.js
 import fs from 'fs';
 import { promises as fsp } from 'fs';
+import path from 'path';
 import mongoose, { Types } from 'mongoose';
 import ffmpeg from 'fluent-ffmpeg';
 import ffprobe from 'ffprobe-static';
@@ -17,6 +18,33 @@ const DEDUP_TTL_MS = 5 * 60 * 1000;
 
 // === helpers ===
 const ts = () => new Date().toISOString();
+const HLS_ROOT = process.env.HLS_ROOT || '/var/www/hls';
+
+async function cleanupHls(streamKey) {
+  if (!streamKey) return;
+  try {
+    const files = await fsp.readdir(HLS_ROOT);
+    const targets = files.filter(name => name.startsWith(`${streamKey}`));
+    await Promise.all(
+      targets.map(name =>
+        fsp
+          .rm(path.join(HLS_ROOT, name), { force: true, recursive: true })
+          .catch(() => {})
+      )
+    );
+    if (targets.length > 0) {
+      console.log(
+        `[on_done] cleaned HLS artifacts`,
+        { streamKey, count: targets.length }
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[on_done] failed to cleanup HLS`,
+      { streamKey, error: e?.message }
+    );
+  }
+}
 
 async function waitForStableFile(
   fullPath,
@@ -244,6 +272,9 @@ export const onDone = async (req, res) => {
       { _id: new Types.ObjectId(stream.userId) },
       { $push: { videos: { url: vodUrl, createdAt: new Date(), duration } } }
     );
+
+    // 12) чистим HLS сегменты для этого ключа (не очищает другие стримы)
+    await cleanupHls(streamKey);
 
     // 12) чистим локальный MP4
     await fsp.unlink(outMp4).catch(() => { });
