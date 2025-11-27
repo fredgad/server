@@ -35,13 +35,27 @@ app.use(requestLogger);
 connectDB();
 webpushInit();
 
+// Поддерживаем оба префикса: /xyz и /api/xyz (клиент шлёт с /api)
 app.use('/auth', authRoutes);
+app.use('/api/auth', authRoutes);
+
 app.use('/user', userRoutes);
+app.use('/api/user', userRoutes);
+
 app.use('/stream', streamRoutes);
+app.use('/api/stream', streamRoutes);
+
 app.use('/video', videoRoutes);
+app.use('/api/video', videoRoutes);
+
 app.use('/notifications', notificationRoutes);
+app.use('/api/notifications', notificationRoutes);
+
 app.use('/hooks', hooksRoutes);
+app.use('/api/hooks', hooksRoutes);
+
 app.use('/uploads', uploadsRoutes);
+app.use('/api/uploads', uploadsRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ts: Date.now() });

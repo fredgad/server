@@ -26,8 +26,9 @@ export const requestLogger = (req, res, next) => {
   res.on('finish', () => {
     const duration = Date.now() - start;
     const userId = req.user?.userId ?? 'anon';
+    const len = req.get('content-length') || bodyPreview?.length || '';
     console.log(
-      `[REQ] ${method} ${originalUrl} ${res.statusCode} ${duration}ms user=${userId} body=${JSON.stringify(
+      `[REQ] ${method} ${originalUrl} ${res.statusCode} ${duration}ms user=${userId} len=${len} body=${JSON.stringify(
         bodyPreview
       )}`
     );

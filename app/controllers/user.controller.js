@@ -21,6 +21,7 @@ export const getUser = async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
   } catch (e) {
+    console.error('[getUser] err', e);
     res.status(500).json({ error: e.message });
   }
 };
@@ -56,6 +57,8 @@ export const saveImage = async (req, res) => {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: 'Image is required' });
 
+    console.log('[saveImage] userId=%s len=%s prefix=%s', userId, image?.length, String(image).slice(0, 40));
+
     const updated = await userModel.findByIdAndUpdate(
       userId,
       { image },
@@ -65,6 +68,7 @@ export const saveImage = async (req, res) => {
 
     res.json({ message: 'Image updated successfully' });
   } catch (e) {
+    console.error('[saveImage] err', e);
     res.status(500).json({ error: e.message });
   }
 };
