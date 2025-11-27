@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 
 import connectDB from './app/config/db.js';
 import { webpushInit } from './app/config/webpush.js';
+import { requestLogger } from './app/middleware/request-logger.js';
 
 import authRoutes from './app/routes/auth.routes.js';
 import userRoutes from './app/routes/user.routes.js';
@@ -29,6 +30,7 @@ const io = new Server(server);
 app.use(cors({ origin: '*' }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
+app.use(requestLogger);
 
 connectDB();
 webpushInit();
