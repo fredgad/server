@@ -1,5 +1,6 @@
 import LiveStream from '../models/stream.model.js';
 import User from '../models/user.model.js';
+import { sendFcm } from '../services/fcm.js';
 
 const buildPlaybackUrl = (req, streamKey) => {
   const proto =
@@ -41,14 +42,22 @@ export const startStream = async (req, res) => {
     if (!user?.keyId) return res.status(400).json({ error: 'keyId missing' });
 
     const title = req.body.title || 'Live';
-    const streamKey = user.keyId; // ← ключ стрима = keyId
+  const streamKey = user.keyId; // ← ключ стрима = keyId
 
-    // создадим/обновим запись стрима
-    const stream = await LiveStream.findOneAndUpdate(
-      { streamKey },
-      { $set: { userId, title, isLive: false } },
-      { new: true, upsert: true }
-    );
+  // создадим/обновим запись стрима
+  const stream = await LiveStream.findOneAndUpdate(
+    { streamKey },
+    {
+      $set: {
+        userId,
+        title,
+        isLive: true,
+        startedAt: new Date(),
+        vodUrl: undefined,
+      },
+    },
+    { new: true, upsert: true }
+  );
 
     const rawHost =
       process.env.MEDIA_HOST ||
@@ -57,6 +66,51 @@ export const startStream = async (req, res) => {
       '127.0.0.1';
 
     const publishRtmp = `rtmp://${rawHost}:1935/live/${streamKey}`;
+    const playbackUrl = buildPlaybackUrl(req, streamKey);
+
+    // Push trusted users that stream is starting
+    try {
+      const trustedKeyIds = (user.trustedPeople || [])
+        .map(p => p.keyId)
+        .filter(Boolean);
+
+      if (trustedKeyIds.length) {
+        const trustedUsers = await User.find(
+          { keyId: { $in: trustedKeyIds } },
+          { fcmTokens: 1 }
+        );
+        const tokens = Array.from(
+          new Set(
+            trustedUsers
+              .flatMap(u => u.fcmTokens || [])
+              .filter(t => typeof t === 'string' && t.length > 10)
+          )
+        );
+
+        const titleText = `${user.username || 'Пользователь'} начал трансляцию`;
+        const bodyText = title;
+
+        await Promise.allSettled(
+          tokens.map(token =>
+            sendFcm({
+              token,
+              title: titleText,
+              body: bodyText,
+              data: {
+                action: 'open_stream',
+                streamId: String(stream._id),
+                streamKey,
+                playbackUrl,
+                fromUsername: user.username || '',
+                fromKeyId: user.keyId || '',
+              },
+            })
+          )
+        );
+      }
+    } catch (err) {
+      console.error('[startStream push] error:', err);
+    }
 
     return res.json({
       ok: true,
