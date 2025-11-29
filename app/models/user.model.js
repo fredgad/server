@@ -51,6 +51,12 @@ const userSchema = new mongoose.Schema({
     default: [],
   },
 
+  // FCM device tokens
+  fcmTokens: {
+    type: [String],
+    default: [],
+  },
+
   liveStreams: {
     type: [
       {

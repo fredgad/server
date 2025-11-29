@@ -16,6 +16,7 @@ import videoRoutes from './app/routes/video.routes.js';
 import notificationRoutes from './app/routes/notification.routes.js';
 import hooksRoutes from './app/routes/hooks.routes.js';
 import uploadsRoutes from './app/routes/uploads.routes.js';
+import pushRoutes from './app/routes/push.routes.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -56,6 +57,9 @@ app.use('/api/hooks', hooksRoutes);
 
 app.use('/uploads', uploadsRoutes);
 app.use('/api/uploads', uploadsRoutes);
+
+app.use('/push', pushRoutes);
+app.use('/api/push', pushRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ts: Date.now() });
