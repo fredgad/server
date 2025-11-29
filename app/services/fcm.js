@@ -66,6 +66,13 @@ export const sendFcm = async ({ token, title, body, data = {} }) => {
       acc[k] = v == null ? '' : String(v);
       return acc;
     }, {}),
+    android: {
+      priority: 'high',
+      notification: {
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        channel_id: 'default_channel',
+      },
+    },
   };
 
   return admin.messaging().send(payload);

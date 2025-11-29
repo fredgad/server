@@ -72,7 +72,7 @@ export const startStream = async (req, res) => {
     try {
       const trustedKeyIds = (user.trustedPeople || [])
         .map(p => p.keyId)
-        .filter(Boolean);
+        .filter(k => k && k !== user.keyId); // не шлём самому себе
 
       if (trustedKeyIds.length) {
         const trustedUsers = await User.find(
