@@ -75,6 +75,9 @@ export const startStream = async (req, res) => {
         .filter(k => k && k !== user.keyId); // не шлём самому себе
 
       if (trustedKeyIds.length) {
+        const selfTokens = new Set(
+          (user.fcmTokens || []).filter(t => typeof t === 'string')
+        );
         const trustedUsers = await User.find(
           { keyId: { $in: trustedKeyIds } },
           { fcmTokens: 1 }
@@ -84,9 +87,20 @@ export const startStream = async (req, res) => {
             trustedUsers
               .filter(u => String(u._id) !== String(userId)) // не отправляем себе
               .flatMap(u => u.fcmTokens || [])
-              .filter(t => typeof t === 'string' && t.length > 10)
+              .filter(
+                t =>
+                  typeof t === 'string' &&
+                  t.length > 10 &&
+                  !selfTokens.has(t) // исключаем токены автора
+              )
           )
         );
+
+        console.log('[startStream push] recipients', {
+          userId: String(userId),
+          trusted: trustedKeyIds,
+          tokenCount: tokens.length,
+        });
 
         const titleText = `${user.username || 'Пользователь'} начал трансляцию`;
         const bodyText = title;
