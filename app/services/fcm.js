@@ -59,10 +59,16 @@ export const sendFcm = async ({ token, title, body, data = {} }) => {
     throw new Error('Firebase Admin not initialized');
   }
 
+  // Гарантируем click_action для Android, чтобы тап по пушу будил приложение
+  const dataWithClick = {
+    click_action: 'FLUTTER_NOTIFICATION_CLICK',
+    ...data,
+  };
+
   const payload = {
     token,
     notification: { title, body },
-    data: Object.entries(data).reduce((acc, [k, v]) => {
+    data: Object.entries(dataWithClick).reduce((acc, [k, v]) => {
       acc[k] = v == null ? '' : String(v);
       return acc;
     }, {}),
