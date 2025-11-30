@@ -72,27 +72,18 @@ export const startStream = async (req, res) => {
     try {
       const trustedKeyIds = (user.trustedPeople || [])
         .map(p => p.keyId)
-        .filter(k => k && k !== user.keyId); // не включаем себя, если добавили по ошибке
+        .filter(Boolean); // отправляем всем в trusted
 
       if (trustedKeyIds.length) {
-        const selfTokens = new Set(
-          (user.fcmTokens || []).filter(t => typeof t === 'string')
-        );
         const trustedUsers = await User.find(
           { keyId: { $in: trustedKeyIds } },
-          { fcmTokens: 1, keyId: 1, _id: 1 }
+          { fcmTokens: 1, keyId: 1 }
         );
         const tokens = Array.from(
           new Set(
             trustedUsers
-              .filter(u => String(u._id) !== String(userId)) // не отправляем себе
               .flatMap(u => u.fcmTokens || [])
-              .filter(
-                t =>
-                  typeof t === 'string' &&
-                  t.length > 10 &&
-                  !selfTokens.has(t) // исключаем свои токены
-              )
+              .filter(t => typeof t === 'string' && t.length > 10)
           )
         );
 
