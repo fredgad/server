@@ -42,22 +42,22 @@ export const startStream = async (req, res) => {
     if (!user?.keyId) return res.status(400).json({ error: 'keyId missing' });
 
     const title = req.body.title || 'Live';
-  const streamKey = user.keyId; // ← ключ стрима = keyId
+    const streamKey = user.keyId; // ← ключ стрима = keyId
 
-  // создадим/обновим запись стрима
-  const stream = await LiveStream.findOneAndUpdate(
-    { streamKey },
-    {
-      $set: {
-        userId,
-        title,
-        isLive: true,
-        startedAt: new Date(),
-        vodUrl: undefined,
+    // создадим/обновим запись стрима
+    const stream = await LiveStream.findOneAndUpdate(
+      { streamKey },
+      {
+        $set: {
+          userId,
+          title,
+          isLive: true,
+          startedAt: new Date(),
+          vodUrl: undefined,
+        },
       },
-    },
-    { new: true, upsert: true }
-  );
+      { new: true, upsert: true }
+    );
 
     const rawHost =
       process.env.MEDIA_HOST ||
@@ -82,6 +82,7 @@ export const startStream = async (req, res) => {
         const tokens = Array.from(
           new Set(
             trustedUsers
+              .filter(u => String(u._id) !== String(userId)) // не отправляем себе
               .flatMap(u => u.fcmTokens || [])
               .filter(t => typeof t === 'string' && t.length > 10)
           )
@@ -129,8 +130,7 @@ export const getActiveStreams = async (req, res) => {
     const currentUser = await User.findById(req.user.userId).select(
       'trustedPeople'
     );
-    if (!currentUser)
-      return res.status(404).json({ error: 'User not found' });
+    if (!currentUser) return res.status(404).json({ error: 'User not found' });
 
     const trustedKeyIds = (currentUser.trustedPeople || [])
       .map(p => p.keyId)
