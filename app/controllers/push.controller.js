@@ -10,6 +10,12 @@ export const registerToken = async (req, res) => {
     const user = await userModel.findById(req.user.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    // Убираем этот токен из других пользователей, чтобы не дублировать на аккаунты одного устройства
+    await userModel.updateMany(
+      { _id: { $ne: user._id }, fcmTokens: token },
+      { $pull: { fcmTokens: token } }
+    );
+
     const set = new Set(user.fcmTokens || []);
     set.add(token);
     user.fcmTokens = Array.from(set);
